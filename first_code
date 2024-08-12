@@ -1,0 +1,65 @@
+from google.cloud import bigquery
+import pandas as pd
+from pyarrow  import parquet
+client=bigquery.Client()
+bucket_name='datacloud-finance-temporary-dev/bigquery-backups'
+project_id='premi0436563-gitenter'
+dataset_id='finance_config'
+#table_id='inaz_employee_master_dq_error_details'
+# destination_uri="gs://{}/{}".format(bucket_name,'inaz_employee_master_dq_error_details.parquet')
+# dataset_ref=bigquery.DatasetReference(project_id,dataset_id)
+# table_ref=dataset_ref.table(table_id)
+# extract_job=client.extract_table(table_ref,
+#                                  destination_uri,
+#                                  )
+# extract_job.result()
+# print("Exported {}:{}.{} to {}".format(project_id,dataset_id,table_id,destination_uri))
+project=client.project
+datasets=list(client.list_datasets())
+# if datasets:
+#     print("Datasets in a project {} :".format(project))
+#     for dataset in datasets:
+#         print("\t {} .".format(dataset.dataset_id))
+tables=list(client.list_tables('finance_config'))
+if tables:
+    for table in tables:
+            project_dr='premi0582367-dc4prddr'
+            dataset_name="{}.{}".format('premi0582367-dc4prddr',f"{dataset_id}")
+            print(dataset_name)
+            if dataset_name :
+                    dataset_info=client.get_dataset(dataset_name)
+            else:
+                    dataset_info=client.create_dataset(dataset_name)
+            dataset_mig="{}".format(dataset_info.dataset_id)
+            print(dataset_mig)
+            destination_uri="gs://{}/{}".format(bucket_name,f"{table.table_id}.parquet")
+            dataset_ref=bigquery.DatasetReference(project_id,dataset_id)
+            table_ref=dataset_ref.table(table.table_id)
+            table_dr_mig=bigquery.DatasetReference(project_dr,dataset_mig)
+            table_dr_id=table_dr_mig.table(table.table_id)
+            print(table_dr_id)
+            print(table_ref)
+            print("\n")
+            print(destination_uri)
+            job_config=bigquery.ExtractJobConfig()
+            job_config.destination_format=(bigquery.DestinationFormat.PARQUET)
+            extract_job=client.extract_table(table_ref,
+                                  destination_uri,
+                                             job_config=job_config
+                                  )
+            extract_job.result()
+            #print("Exported {}:{}.{} to {}".format(project_id,dataset_id,table_id,destination_uri))
+            #table_id=
+
+            job_config=bigquery.LoadJobConfig(
+                    source_format=bigquery.SourceFormat.PARQUET,
+            )
+            load_job=client.load_table_from_uri(
+                destination_uri,table_dr_id,job_config=job_config
+            )
+            load_job.result()
+            destination_table=client.get_table(table_dr_id)
+            # dataset_parquet_load=parquet.ParquetDataset(destination_uri)
+            # df=dataset_parquet_load.read().to_pandas()
+
+
