@@ -41,7 +41,7 @@ def get_snapshot_timestamp():
 def create_snapshot():
     for dataset in datasets:
         # print(dataset.dataset_id)
-        dataset_to_search='gtd'
+        dataset_to_search='procure'
         if dataset_to_search in dataset.dataset_id :
             datasets_list.append(dataset.dataset_id)
     print(datasets_list)
@@ -451,7 +451,8 @@ def snap_run(dataset_list_return):
                 # schema=schema
                          )
                         load_job.result()
-                    print('Time taken to migrate table in %s seconds ' %(time.time()-start_time))
+                    print('Table {}.{} is migrated in %s seconds'.format(table.dataset_id,table.table_id) %(time.time()-start_time))
+                    # print('Time taken to migrate table in %s seconds '  %(time.time()-start_time))
                     storage_client=storage.Client()
                     bucket=storage_client.get_bucket(bucket_config)
                     blob=bucket.list_blobs(prefix=blob_name)
@@ -463,6 +464,7 @@ def snap_run(dataset_list_return):
 #     for i in source_table
 if __name__=="__main__":
     # start_time=time.time()
+    process_list=[]
     storage_client=storage.Client()
     bucket=storage_client.get_bucket(bucket_config)
     blob=bucket.list_blobs(prefix=blob_name)
@@ -474,6 +476,9 @@ if __name__=="__main__":
     for dataset in datasets_list:
         result=Process(target=snap_run,args=(dataset,))
         result.start()
+        process_list.append(result)
+    for process in process_list:
+        process.join()
     # create_snapshot()
 
 # comparing_snapshots()
@@ -481,5 +486,11 @@ if __name__=="__main__":
 # source_table_id='premi0436563-gitenter.procure_dq.vms_subcon_active_dq_error_details'
 # snapshot_table_id={'project_id'}join {'dataset_id'} 'snaps_vms_subcon_active_dq_error_details'
 
-
+# cleaning_snap_dataset():
+#     dataset_to_be_removed=[]
+#     for table.dataset_id in 'snapshot':
+#         dataset_to_be_removed.append()
+#     client.delete_dataset(
+#         dataset_to_be_removed,delete_contents=True
+#     )
 
