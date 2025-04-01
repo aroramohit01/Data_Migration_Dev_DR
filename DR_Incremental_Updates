@@ -1,0 +1,188 @@
+import base64
+from cronsim import CronSim
+from google.cloud import bigquery
+from dateutil.relativedelta import relativedelta
+from google.cloud.exceptions import NotFound
+import time
+import logging
+from google.oauth2 import service_account
+from google.auth.transport.requests import AuthorizedSession
+from google.cloud import storage
+import os, sys
+import json
+from datetime import datetime
+from google.api_core.exceptions import NotFound
+
+# Define constants and initialize BigQuery client
+project_id = 'premi0541131-dataclou'
+datasets_list = []
+source_table = []
+#dataset_id = 'procure_curated'
+
+dr_project_id = 'premi0582367-dc4prddr'
+#dr_dataset_id = 'procure_curated_shubham'
+dataset_list=[]
+bucket_name='datacloud-datalake-procure-rejections-uat/migration-data'
+blob_name='file.parquet'
+
+client = bigquery.Client(project='premi0541131-dataclou')
+datasets = list(client.list_datasets())
+for dataset in datasets:
+    dataset_to_search='hr_raw'
+    if dataset_to_search == dataset.dataset_id :
+        dataset_list.append(dataset.dataset_id)
+
+    # dataset_to_search='hr_curated'
+        tables=list(client.list_tables(dataset_to_search))
+        # print(tables)
+        for table in tables:
+            print("{}.{}.{}".format(project_id, table.dataset_id, table.table_id))
+            dataset_copy_list=f"{project_id}.{table.dataset_id}_copy"
+            dataset_copy_creation=bigquery.Dataset(dataset_copy_list)
+            dataset_copy_creation.location='europe-west9'
+            dataset_snapshot_list=f"{project_id}.{table.dataset_id}_dr"
+            dataset_creation=bigquery.Dataset(dataset_snapshot_list)
+            dataset_creation.location='europe-west9'
+            try:
+                dataset_copy_info=client.get_dataset(dataset_copy_creation)
+            except NotFound:
+                dataset_copy_info=client.create_dataset(dataset_copy_creation)
+            try:
+                dataset_info=client.get_dataset(dataset_creation)
+            except NotFound:
+                dataset_info=client.create_dataset(dataset_creation)
+
+
+            migrate_query=f""" 
+                    Select * 
+                    from `{project_id}.{dataset.dataset_id}.{table.table_id}`
+                    
+                    """
+            original_query=f"""
+                        select *
+                        from `{project_id}.{dataset_copy_info.dataset_id}.{table.table_id}`
+                        
+                        """
+        # merge_query=f'''     MERGE `{project_id}.{table.dataset_id}.{table.table_id}` AS dr
+        #                     USING (
+        #                         SELECT {', '.join(aggregated_columns)}
+        #                             FROM `{snapshot_table_id}` AS snap
+        #
+        #                         ) AS snap
+        #                          ON dr.{col.name} = snap.{col.name}
+        #                         WHEN MATCHED THEN
+        #                             UPDATE SET
+        #                              dr.{col.name} = snap.{col.name}
+        #                         WHEN NOT MATCHED THEN
+        #                             INSERT ({', '.join(column_lst)})
+        #                             VALUES ({', '.join([f"snap.{col.name}" for col in columns])})
+        #
+        #                             '''
+            print(f"Generated merge query: {migrate_query}")
+            src_table=f"{project_id}.{table.dataset_id}.{table.table_id}"
+            dataset_snap="{}".format(dataset_copy_info.dataset_id)
+            dataset_copy="{}".format(dataset_info.dataset_id)
+            table_dr_mig=bigquery.DatasetReference(project_id,dataset_snap)
+            table_dr_copy=bigquery.DatasetReference(project_id,dataset_copy)
+            table_snap_id=table_dr_mig.table(table.table_id)
+            table_copy_id=table_dr_copy.table(table.table_id)
+            if 'vw' in table.table_id:
+                continue
+            try:
+                client.get_table(table)
+                print("table {} exist".format(table.table_id))
+            except NotFound:
+                copy_config=bigquery.CopyJobConfig()
+                copy_job=client.copy_table(
+                        sources=src_table,
+                        destination=table_snap_id,
+                        job_config=copy_config,
+                        )
+                result=copy_job.result()
+                print("Snap table Created",table_snap_id)
+                row_exec=client.query(migrate_query)
+                row_result=row_exec.result()
+                copy_config=bigquery.CopyJobConfig()
+                dr_job=client.copy_table(
+                        sources=src_table,
+                        destination=table_copy_id,
+                        job_config=copy_config,
+                        )
+                result_copy=dr_job.result()
+                print("Copy table Created",table_copy_id)
+                row_exec=client.query(migrate_query)
+                row_result_copy=row_exec.result()
+            if 'vw' in table.table_id:
+                continue
+            try:
+                    change_query=f""" 
+                    EXPORT DATA OPTIONS (
+                    uri = 'gs://{bucket_name}/{table.table_id}*.parquet',
+                    format = 'PARQUET',
+                    overwrite=true
+
+                    ) AS
+                    select *
+                          from `{project_id}.{dataset.dataset_id}.{table.table_id}`
+                            except distinct
+                            select * from
+                            `{project_id}.{dataset_info.dataset_id}.{table.table_id}`
+
+                            """
+            except:
+                    print('Query Error')
+            resultant_query=client.query(change_query)
+
+            resultant_res=resultant_query.result()
+
+            resultant_df=resultant_query.to_dataframe()
+            # storage_client=storage.Client()
+            # bucket=storage_client.get_bucket(bucket_name)
+            # blob=bucket.blob(blob_name)
+            # blob.update_from_string(resultant_df)
+            print("Resultant table",resultant_df)
+            destination_uri="gs://{}/{}".format(bucket_name,f"{table.table_id}*.parquet")
+            print("Destination URI",destination_uri)
+            project_dr='premi0582367-dc4prddr'
+            print("Datasets in project {}:".format(project_dr))
+            # dataset_name="{}.{}".format('premi0582367-dc4prddr',f"{dataset_id}")
+            dataset_name="{}.{}".format('premi0582367-dc4prddr',f"{table.dataset_id}")
+            dataset_creation=bigquery.Dataset(dataset_name)
+            dataset_creation.location='europe-west3'
+            print(dataset_name)
+            # start_time=time.time()
+            try:
+                dataset_info=client.get_dataset(dataset_creation)
+                        # dataset_info.location="europe-west3"
+            except NotFound:
+                dataset_info=client.create_dataset(dataset_creation)
+
+
+
+            cross_dataset_ref="{}".format(dataset_info.dataset_id)
+            cross_region_dataset=bigquery.DatasetReference(dr_project_id,cross_dataset_ref)
+            cross_region_dataset_id=cross_region_dataset.table(table.table_id)
+            print("Cross Region table created ",cross_region_dataset_id)
+            job_config=bigquery.LoadJobConfig(
+                        source_format=bigquery.SourceFormat.PARQUET,
+                    # schema=schema
+                        )
+            load_job=client.load_table_from_uri(
+                        destination_uri,cross_region_dataset_id,
+                        job_config=job_config,
+                # schema=schema
+                         )
+            job_config=bigquery.LoadJobConfig(
+                        source_format=bigquery.SourceFormat.PARQUET,
+                    # schema=schema
+                        )
+            load_job=client.load_table_from_uri(
+                        destination_uri,table_copy_id,
+                        job_config=job_config,
+                # schema=schema
+                         )
+            load_job.result()
+
+
+
+
